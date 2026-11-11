@@ -1,0 +1,67 @@
+name: Windows-Installer bauen
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Abhaengigkeiten installieren
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller pytest
+
+      - name: Tests
+        run: python -m pytest -q tests
+
+      - name: GUI-Test (Fenster oeffnen und schliessen)
+        run: python -c "from lasrasterthin.gui import App; a=App(); a.update(); a.destroy(); print('GUI ok')"
+
+      - name: EXE bauen (PyInstaller)
+        run: |
+          python -m PyInstaller --noconfirm --windowed --name LasRasterThin --collect-all laspy --collect-all lazrs run_gui.py
+          python -m PyInstaller --noconfirm --onefile --console --name lasrasterthin-cli --collect-all laspy --collect-all lazrs run_cli.py
+
+      - name: EXE-Test (CLI auf Testdatei)
+        shell: pwsh
+        run: |
+          python -c "import sys; sys.path.insert(0,'tests'); from test_core import make_las; make_las('smoke.laz', n=100000)"
+          .\dist\lasrasterthin-cli.exe smoke.laz -c 0.5 --las
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          if (!(Test-Path smoke_raster0p5.las)) { exit 1 }
+
+      - name: Installer bauen (Inno Setup)
+        shell: pwsh
+        run: |
+          if (!(Get-Command iscc -ErrorAction SilentlyContinue)) { choco install innosetup -y --no-progress }
+          $ver = (python -c "import lasrasterthin; print(lasrasterthin.__version__)")
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+          if (!$iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          Push-Location installer
+          & $iscc "/DAppVersion=$ver" LasRasterThin.iss
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Pop-Location
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LasRasterThin-Setup
+          path: installer/Output/*.exe
+
+      - name: Release (nur bei Tag v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: installer/Output/*.exe
