@@ -31,6 +31,19 @@ Anzahl belegter Zellen ab, nicht von der Dateigrösse. Bei wenig RAM: «Punkte p
 
 Keine Python-Installation nötig.
 
+### Windows-Warnung «Der Computer wurde durch Windows geschützt»
+
+Die Setup-Datei ist nicht digital signiert. Darum warnt Windows SmartScreen (Schutzfilter für
+unbekannte Programme). Jeder Build wird mit Microsoft Defender geprüft (Ergebnis im Build-Log).
+
+- Installieren trotzdem: **Weitere Informationen** → **Trotzdem ausführen**.
+- Echtheit prüfen: SHA256-Prüfsumme (digitaler Fingerabdruck) vergleichen:
+  `Get-FileHash LasRasterThin-Setup-1.0.0.exe` (PowerShell) muss den Wert aus
+  `LasRasterThin-Setup-1.0.0.exe.sha256.txt` ergeben.
+- Warnung ganz weg: Code-Signing-Zertifikat kaufen und als Repository-Secrets
+  `WINDOWS_CERT_PFX` (PFX-Datei als Base64) und `WINDOWS_CERT_PASSWORD` hinterlegen.
+  Der Build signiert dann automatisch.
+
 ## Bedienung
 
 1. LAS/LAZ-Dateien oder ganzen Ordner hinzufügen.
