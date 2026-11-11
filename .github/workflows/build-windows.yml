@@ -12,6 +12,10 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      # Optional: Code-Signing-Zertifikat (PFX, Base64) als Repository-Secret hinterlegen
+      CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX }}
+      CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
 
@@ -22,7 +26,11 @@ jobs:
       - name: Abhaengigkeiten installieren
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt pyinstaller pytest
+          python -m pip install -r requirements.txt pytest
+          # PyInstaller-Starter (Bootloader) selbst kompilieren:
+          # der vorgefertigte Starter wird von Virenscannern oft falsch als schaedlich gemeldet.
+          $env:PYINSTALLER_COMPILE_BOOTLOADER = "1"
+          python -m pip install --no-binary pyinstaller pyinstaller
 
       - name: Tests
         run: python -m pytest -q tests
@@ -32,16 +40,26 @@ jobs:
 
       - name: EXE bauen (PyInstaller)
         run: |
-          python -m PyInstaller --noconfirm --windowed --name LasRasterThin --collect-all laspy --collect-all lazrs run_gui.py
-          python -m PyInstaller --noconfirm --onefile --console --name lasrasterthin-cli --collect-all laspy --collect-all lazrs run_cli.py
+          New-Item -ItemType Directory -Force build | Out-Null
+          python packaging/version_info.py
+          python -m PyInstaller --noconfirm packaging/LasRasterThin.spec
 
       - name: EXE-Test (CLI auf Testdatei)
         shell: pwsh
         run: |
           python -c "import sys; sys.path.insert(0,'tests'); from test_core import make_las; make_las('smoke.laz', n=100000)"
-          .\dist\lasrasterthin-cli.exe smoke.laz -c 0.5 --las
+          .\dist\LasRasterThin\lasrasterthin-cli.exe smoke.laz -c 0.5 --las
           if ($LASTEXITCODE -ne 0) { exit 1 }
           if (!(Test-Path smoke_raster0p5.las)) { exit 1 }
+
+      - name: EXE signieren (nur wenn Zertifikat hinterlegt)
+        if: env.CERT_PFX != ''
+        shell: pwsh
+        run: |
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\cert.pfx", [Convert]::FromBase64String($env:CERT_PFX))
+          $st = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Select-Object -Last 1
+          & $st.FullName sign /f "$env:RUNNER_TEMP\cert.pfx" /p $env:CERT_PASSWORD /fd sha256 /tr http://timestamp.digicert.com /td sha256 dist\LasRasterThin\LasRasterThin.exe dist\LasRasterThin\lasrasterthin-cli.exe
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
       - name: Installer bauen (Inno Setup)
         shell: pwsh
@@ -55,13 +73,45 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit 1 }
           Pop-Location
 
+      - name: Setup signieren (nur wenn Zertifikat hinterlegt)
+        if: env.CERT_PFX != ''
+        shell: pwsh
+        run: |
+          $st = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Select-Object -Last 1
+          & $st.FullName sign /f "$env:RUNNER_TEMP\cert.pfx" /p $env:CERT_PASSWORD /fd sha256 /tr http://timestamp.digicert.com /td sha256 (Get-ChildItem installer\Output\*.exe).FullName
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Virenscan mit Microsoft Defender
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $mp = "$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
+          if (!(Test-Path $mp)) { Write-Host "Defender nicht vorhanden"; exit 0 }
+          & $mp -SignatureUpdate | Out-Null
+          foreach ($f in @((Get-ChildItem installer\Output\*.exe).FullName, "dist\LasRasterThin\LasRasterThin.exe", "dist\LasRasterThin\lasrasterthin-cli.exe")) {
+            Write-Host "== $f"
+            & $mp -Scan -ScanType 3 -File (Resolve-Path $f) -DisableRemediation
+            Write-Host "Ergebnis (0 = sauber, 2 = Fund): $LASTEXITCODE"
+          }
+
+      - name: SHA256-Pruefsumme
+        shell: pwsh
+        run: |
+          Get-ChildItem installer\Output\*.exe | ForEach-Object {
+            "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash)  $($_.Name)" | Tee-Object -FilePath "$($_.FullName).sha256.txt"
+          }
+
       - uses: actions/upload-artifact@v4
         with:
           name: LasRasterThin-Setup
-          path: installer/Output/*.exe
+          path: |
+            installer/Output/*.exe
+            installer/Output/*.sha256.txt
 
       - name: Release (nur bei Tag v*)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: installer/Output/*.exe
+          files: |
+            installer/Output/*.exe
+            installer/Output/*.sha256.txt

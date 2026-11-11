@@ -18,6 +18,12 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequiredOverridesAllowed=dialog
 WizardStyle=modern
+VersionInfoVersion={#AppVersion}
+VersionInfoCompany=LasRasterThin
+VersionInfoDescription=LasRasterThin Setup
+VersionInfoProductName=LasRasterThin
+VersionInfoProductVersion={#AppVersion}
+UninstallDisplayIcon={app}\LasRasterThin.exe
 
 [Languages]
 Name: "german"; MessagesFile: "compiler:Languages\German.isl"
@@ -27,7 +33,6 @@ Name: "desktopicon"; Description: "Desktop-Verknüpfung erstellen"; GroupDescrip
 
 [Files]
 Source: "..\dist\LasRasterThin\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\dist\lasrasterthin-cli.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion isreadme
 
 [Icons]
